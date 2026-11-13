@@ -54,13 +54,25 @@ class GameWindow:
         self.status.pack(pady=(10, 4))
         tk.Button(root, text="Новая игра", command=self.restart).pack(pady=(0, 12))
 
-        for key in ("Left", "Right", "Up", "Down"):
-            root.bind(f"<KeyPress-{key}>", self.on_move)
+        root.bind("<KeyPress>", self.on_move)
         self.draw()
         root.focus_set()
 
     def on_move(self, event):
-        if self.game.move(event.keysym.lower()):
+        key = event.keysym.lower()
+        if key == "r":
+            self.restart()
+            return "break"
+        directions = {
+            "left": "left", "a": "left",
+            "right": "right", "d": "right",
+            "up": "up", "w": "up",
+            "down": "down", "s": "down",
+        }
+        direction = directions.get(key)
+        if direction is None:
+            return
+        if self.game.move(direction):
             self.draw()
         return "break"
 
@@ -84,7 +96,7 @@ class GameWindow:
         elif self.game.reached_target:
             message = f"Ты собрал {TARGET}! Можно играть дальше."
         else:
-            message = "Двигай плитки стрелками на клавиатуре"
+            message = "Стрелки / WASD — ход · R — новая игра"
         self.status.configure(text=message)
 
 
