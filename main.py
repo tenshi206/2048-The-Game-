@@ -1,6 +1,7 @@
 import tkinter as tk
 
 from game import Game, SIZE, TARGET
+from high_score import load_high_score, save_high_score
 
 
 BACKGROUND = "#faf8ef"
@@ -24,6 +25,8 @@ TILE_COLORS = {
 class GameWindow:
     def __init__(self, root):
         self.game = Game()
+        self.high_score = load_high_score()
+        self.saved_high_score = self.high_score
         root.title("2048")
         root.configure(bg=BACKGROUND)
         root.resizable(False, False)
@@ -32,9 +35,14 @@ class GameWindow:
         header.pack(fill="x", padx=16, pady=(12, 8))
         tk.Label(header, text="2048", font=("TkDefaultFont", 28, "bold"),
                  bg=BACKGROUND, fg=TEXT).pack(side="left")
-        self.score = tk.Label(header, bg=BACKGROUND, fg=TEXT,
+        scores = tk.Frame(header, bg=BACKGROUND)
+        scores.pack(side="right")
+        self.record = tk.Label(scores, bg=BACKGROUND, fg=TEXT,
+                               font=("TkDefaultFont", 12))
+        self.record.pack(anchor="e")
+        self.score = tk.Label(scores, bg=BACKGROUND, fg=TEXT,
                               font=("TkDefaultFont", 14, "bold"))
-        self.score.pack(side="right")
+        self.score.pack(anchor="e")
 
         board = tk.Frame(root, bg="#bbada0", padx=5, pady=5)
         board.pack(padx=16)
@@ -81,6 +89,14 @@ class GameWindow:
         self.draw()
 
     def draw(self):
+        self.high_score = max(self.high_score, self.game.score)
+        if self.high_score > self.saved_high_score:
+            if save_high_score(self.high_score):
+                self.saved_high_score = self.high_score
+        record_text = f"Рекорд: {self.high_score}"
+        if self.high_score > self.saved_high_score:
+            record_text += " (не сохранён)"
+        self.record.configure(text=record_text)
         for row, values in enumerate(self.game.board):
             for col, value in enumerate(values):
                 self.tiles[row][col].configure(
