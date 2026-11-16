@@ -33,6 +33,9 @@ class Game:
         self.board = [[0] * SIZE for _ in range(SIZE)]
         self.score = 0
         self.reached_target = False
+        self.transitions = []
+        self.merged_cells = set()
+        self.spawned_cell = None
         self.add_tile()
         self.add_tile()
 
@@ -46,6 +49,7 @@ class Game:
         if empty:
             row, col = choice(empty)
             self.board[row][col] = 2 if random() < 0.9 else 4
+            self.spawned_cell = (row, col)
 
     def move(self, direction):
         """Выполняет ход и возвращает True, если поле изменилось."""
@@ -58,6 +62,9 @@ class Game:
         positions = list(positions)
         vertical = direction in ("up", "down")
         changed = False
+        self.transitions = []
+        self.merged_cells = set()
+        self.spawned_cell = None
 
         for index in range(SIZE):
             # Читаем строку или столбец от края, к которому движутся плитки.
@@ -68,6 +75,19 @@ class Game:
 
             line = [self.board[row][col] for row, col in cells]
             merged, points = merge_line(line)
+            occupied = [(cell, value) for cell, value in zip(cells, line) if value]
+            source_index = 0
+            for destination, value in zip(cells, merged):
+                if value == 0:
+                    break
+                source, original = occupied[source_index]
+                self.transitions.append((source, destination, original))
+                source_index += 1
+                if original != value:
+                    source, original = occupied[source_index]
+                    self.transitions.append((source, destination, original))
+                    self.merged_cells.add(destination)
+                    source_index += 1
             if merged != line:
                 changed = True
                 self.score += points
