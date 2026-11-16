@@ -311,82 +311,76 @@ class GameWindow:
                 self.start_effect("lightning", before, pair)
         self.draw()
 
+    def blend(self, foreground, background, opacity):
+        opacity = max(0, min(1, opacity))
+        channels = []
+        for index in (1, 3, 5):
+            a = int(foreground[index:index + 2], 16)
+            b = int(background[index:index + 2], 16)
+            channels.append(round(b + (a - b) * opacity))
+        return "#" + "".join(f"{value:02x}" for value in channels)
+
+    def frost(self, opacity, tag="ice", drift=0):
+        # Frost stays on the border, keeping the numbers unobstructed.
+        color = self.blend("#d9f8ff", BOARD, opacity)
+        for inset, width, strength in ((3, 6, 0.3), (5, 2, 0.8)):
+            self.canvas.create_rectangle(
+                inset, inset, WIDTH-inset, WIDTH-inset,
+                outline=self.blend("#9de5f5", BOARD, opacity*strength),
+                width=width, tags=tag)
+        for edge in range(4):
+            for index in range(10):
+                along = 14 + index * (WIDTH - 28) / 9
+                depth = 10 + (index * 7 % 13)
+                points = [(along-5, 4), (along, depth), (along+5, 4)]
+                if edge == 1:
+                    points = [(WIDTH-y, x) for x, y in points]
+                elif edge == 2:
+                    points = [(WIDTH-x, WIDTH-y) for x, y in points]
+                elif edge == 3:
+                    points = [(y, WIDTH-x) for x, y in points]
+                self.canvas.create_line(
+                    [coordinate + drift * math.sin(index + edge) for point in points for coordinate in point],
+                    fill=color, width=1.5, tags=tag)
+
     def draw_ice(self):
         self.canvas.delete("ice")
         if self.game.ice_moves:
-            self.canvas.create_rectangle(3, 3, WIDTH - 3, WIDTH - 3,
-                                         outline="#80d6ec", width=5, tags="ice")
-            for x in range(16, WIDTH, 35):
-                self.canvas.create_line(x, 3, x + 8, 17, x + 16, 3,
-                                        fill="#d2f7ff", width=2, tags="ice")
+            self.frost(0.85)
+
+    def glow_ring(self, x, y, radius, color, opacity, background=EMPTY):
+        for width, strength in ((12, 0.12), (6, 0.25), (2, 0.9)):
+            self.canvas.create_oval(
+                x-radius, y-radius, x+radius, y+radius,
+                outline=self.blend(color, background, opacity*strength),
+                width=width, tags="effect")
+
+    def spark(self, x, y, size, color, opacity):
+        if size < 0.3 or opacity <= 0:
+            return
+        self.canvas.create_oval(
+            x-size*1.8, y-size*1.8, x+size*1.8, y+size*1.8,
+            fill=self.blend(color, EMPTY, opacity*0.2), outline="", tags="effect")
+        self.canvas.create_oval(
+            x-size, y-size, x+size, y+size,
+            fill=self.blend(color, EMPTY, opacity), outline="", tags="effect")
 
     def start_effect(self, kind, before=None, target=None):
         self.effect_running = True
         self.pending_direction = None
+        self.draw()
         self.effect_frame(kind, time.perf_counter(), before, target)
 
     def effect_frame(self, kind, started, before, target):
-        duration = 0.6 if kind == "fire" else 0.5
+        duration = {"fire": 0.78, "ice": 0.65, "lightning": 0.7, "thaw": 0.65}[kind]
         progress = min(1, (time.perf_counter() - started) / duration)
-        self.draw()
         self.canvas.delete("effect")
         if kind == "fire":
-            row, col = target
-            x, y = self.cell_position(target)
-            cx, cy = x + CELL + GAP / 2, y + CELL + GAP / 2
-            for r in range(row, row + 2):
-                for c in range(col, col + 2):
-                    value = before[r][c]
-                    if 0 < value <= 32 and progress < 0.65:
-                        self.tile(value, *self.cell_position((r, c)), 1 - progress)
-            radius = (CELL + GAP) * progress
-            self.canvas.create_oval(cx-radius, cy-radius, cx+radius, cy+radius,
-                                    outline="#f3a43b", width=max(1, int(10*(1-progress))), tags="effect")
-            for i in range(24):
-                angle = i * math.tau / 24
-                distance = radius * (0.6 + (i % 4) / 5)
-                px, py = cx + math.cos(angle)*distance, cy + math.sin(angle)*distance
-                size = 4*(1-progress) + 1
-                self.canvas.create_oval(px-size, py-size, px+size, py+size,
-                                        fill="#ef713c", outline="", tags="effect")
+            self.fire_frame(progress, before, target)
         elif kind == "lightning":
-            self.canvas.delete("tiles")
-            first, second = target
-            for r, values in enumerate(before):
-                for c, value in enumerate(values):
-                    if value and (r, c) not in target:
-                        self.tile(value, *self.cell_position((r, c)))
-            x1, y1 = self.cell_position(first)
-            x2, y2 = self.cell_position(second)
-            eased = progress * progress * (3 - 2 * progress)
-            length = max(1, math.hypot(x2-x1, y2-y1))
-            arc = math.sin(progress * math.pi) * 35
-            dx, dy = -(y2-y1)/length*arc, (x2-x1)/length*arc
-            for source, start, end, sign in (
-                (first, (x1, y1), (x2, y2), 1),
-                (second, (x2, y2), (x1, y1), -1),
-            ):
-                value = before[source[0]][source[1]]
-                if value:
-                    self.tile(value, start[0]+(end[0]-start[0])*eased+dx*sign,
-                              start[1]+(end[1]-start[1])*eased+dy*sign)
-            points = []
-            for i in range(13):
-                t = i / 12
-                jitter = math.sin(i*7 + progress*35)*10 if i not in (0, 12) else 0
-                points.extend((x1+CELL/2+(x2-x1)*t+jitter,
-                               y1+CELL/2+(y2-y1)*t-jitter))
-            self.canvas.create_line(points, fill="#b2a4ff", width=5, tags="effect")
-            self.canvas.create_line(points, fill="#f4efff", width=2, tags="effect")
+            self.lightning_frame(progress, before, target)
         else:
-            inset = 3 + (progress*30 if kind == "thaw" else (1-progress)*22)
-            self.canvas.create_rectangle(inset, inset, WIDTH-inset, WIDTH-inset,
-                                         outline="#b3edff", width=max(1, int(9*(1-progress))), tags="effect")
-            if kind == "thaw":
-                for i in range(16):
-                    x = i * WIDTH / 16
-                    self.canvas.create_line(x, progress*40, x+12, progress*40+18,
-                                            fill="#8dd9f1", width=2, tags="effect")
+            self.ice_frame(progress, kind == "thaw")
         if progress >= 1:
             self.animation = None
             self.effect_running = False
@@ -394,6 +388,107 @@ class GameWindow:
             self.draw()
             return
         self.animation = self.root.after(16, self.effect_frame, kind, started, before, target)
+
+    def fire_frame(self, progress, before, target):
+        self.canvas.delete("tiles")
+        row, col = target
+        x, y = self.cell_position(target)
+        cx, cy = x + CELL + GAP/2, y + CELL + GAP/2
+        burn = min(1, max(0, (progress-0.12)/0.58))
+        for r, values in enumerate(before):
+            for c, value in enumerate(values):
+                inside = row <= r < row+2 and col <= c < col+2
+                if value:
+                    scale = 1
+                    if inside and value <= 32:
+                        scale = (1-burn) ** 1.5
+                    if scale > 0.04:
+                        self.tile(value, *self.cell_position((r, c)), scale)
+        expansion = 1 - (1-progress)**3
+        fade = math.sin(math.pi * progress)**0.8
+        self.glow_ring(cx, cy, (CELL+GAP)*expansion, "#ffb650", fade)
+        self.glow_ring(cx, cy, (CELL+GAP)*expansion*0.72, "#fff0b0", fade*0.55)
+        # Deterministic trajectories avoid frame-to-frame particle flicker.
+        for i in range(42):
+            angle = i * 2.39996
+            speed = 35 + (i*17 % 65)
+            distance = speed * expansion
+            px = cx + math.cos(angle)*distance
+            py = cy + math.sin(angle)*distance - progress*progress*32
+            life = max(0, math.sin(math.pi*progress)) * (0.6 + (i % 3)*0.2)
+            color = ("#ffcc73", "#f58a4b", "#fff0bb")[i % 3]
+            self.spark(px, py, (1.5+i%3)*(1-progress*0.65), color, life)
+        for r in range(row, row+2):
+            for c in range(col, col+2):
+                if 0 < before[r][c] <= 32:
+                    tx, ty = self.cell_position((r, c))
+                    radius = CELL * (0.35 + burn*0.15)
+                    self.glow_ring(tx+CELL/2, ty+CELL/2, radius,
+                                   "#ffcc73", fade*0.4)
+
+    def lightning_frame(self, progress, before, target):
+        self.canvas.delete("tiles")
+        first, second = target
+        x1, y1 = self.cell_position(first)
+        x2, y2 = self.cell_position(second)
+        travel = max(0, min(1, (progress-0.18)/0.62))
+        eased = travel*travel*(3-2*travel)
+        distance = max(1, math.hypot(x2-x1, y2-y1))
+        arc = math.sin(travel*math.pi)*min(32, distance*0.2)
+        dx, dy = -(y2-y1)/distance*arc, (x2-x1)/distance*arc
+        for r, values in enumerate(before):
+            for c, value in enumerate(values):
+                if value and (r, c) not in target:
+                    self.tile(value, *self.cell_position((r, c)))
+        beam_strength = math.sin(math.pi*progress)**0.7
+        points = []
+        for i in range(17):
+            t = i/16
+            jitter = math.sin(i*2.7 + progress*9)*7*math.sin(t*math.pi)
+            points.extend((x1+CELL/2+(x2-x1)*t-(y2-y1)/distance*jitter,
+                           y1+CELL/2+(y2-y1)*t+(x2-x1)/distance*jitter))
+        for width, strength, color in ((15, 0.12, "#9887ed"), (8, 0.3, "#b5a5ff"), (3, 0.85, "#dcd0ff"), (1, 1, "#fff7ff")):
+            self.canvas.create_line(
+                points, fill=self.blend(color, EMPTY, beam_strength*strength),
+                width=width, smooth=True, tags="effect")
+        for source, start, end, sign in (
+            (first, (x1,y1), (x2,y2), 1), (second, (x2,y2), (x1,y1), -1),
+        ):
+            px = start[0]+(end[0]-start[0])*eased+dx*sign
+            py = start[1]+(end[1]-start[1])*eased+dy*sign
+            value = before[source[0]][source[1]]
+            self.glow_ring(px+CELL/2, py+CELL/2, CELL*0.46, "#b8a1ff", beam_strength)
+            if value:
+                self.tile(value, px, py, 1+0.025*math.sin(travel*math.pi))
+            for i in range(8):
+                angle = i*math.tau/8 + progress*1.4
+                radius = CELL*0.52
+                self.spark(px+CELL/2+math.cos(angle)*radius,
+                           py+CELL/2+math.sin(angle)*radius,
+                           1.5, "#e3d7ff", beam_strength*0.8)
+
+    def ice_frame(self, progress, thaw):
+        self.canvas.delete("ice")
+        eased = 1-(1-progress)**3
+        opacity = 1-eased if thaw else eased
+        self.frost(opacity, "effect", drift=progress*8 if thaw else 0)
+        for edge in range(4):
+            for i in range(12):
+                along = 12+i*(WIDTH-24)/11
+                drift = progress*progress*22 if thaw else (1-eased)*18
+                px, py = along, 7+drift
+                if edge == 1:
+                    px, py = WIDTH-py, px
+                elif edge == 2:
+                    px, py = WIDTH-px, WIDTH-py
+                elif edge == 3:
+                    px, py = py, WIDTH-px
+                twinkle = max(0, math.sin(math.pi*progress))*(0.6+0.4*math.sin(i+progress*3)**2)
+                self.spark(px, py, 1.5+i%2, "#e0faff", twinkle)
+                if thaw:
+                    color = self.blend("#c2f2ff", BOARD, 1-progress)
+                    self.canvas.create_line(px-3, py-4, px+3, py+4,
+                                            fill=color, width=1, tags="effect")
 
     def cancel_animation(self):
         if self.animation is not None:
