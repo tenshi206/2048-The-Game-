@@ -1,4 +1,7 @@
 from random import choice, random
+from uuid import uuid4
+
+from progression import CONTRACTS, COMBINATIONS, TILE_REWARDS
 
 
 SIZE = 4
@@ -29,9 +32,20 @@ class Game:
     def __init__(self):
         self.reset()
 
-    def reset(self):
+    def reset(self, contract=None):
         self.board = [[0] * SIZE for _ in range(SIZE)]
         self.score = 0
+        self.round_id = uuid4().hex
+        self.contract = contract if contract in CONTRACTS else None
+        self.contract_state = "active" if self.contract else "none"
+        self.contract_progress = 0
+        self.reward_events = []
+        self.earned_tiles = set()
+        self.used_elements = set()
+        self.last_element = None
+        self.last_combinations = []
+        self.round_combinations = set()
+        self.ice_points = 0
         self.charges = {"fire": 0, "ice": 0, "lightning": 0}
         self.rewarded = set()
         self.ice_moves = 0
@@ -64,6 +78,7 @@ class Game:
         if self.game_over:
             return False
         self.ice_just_ended = False
+        previous_score = self.score
         positions = range(SIZE)
         if direction in ("right", "down"):
             positions = reversed(range(SIZE))
@@ -103,6 +118,9 @@ class Game:
                     self.board[row][col] = value
 
         if changed:
+            self.last_element = None
+            self.last_combinations = []
+            self.record_move(self.score - previous_score)
             self.award_elements()
             if self.ice_moves:
                 self.ice_moves -= 1
@@ -113,6 +131,7 @@ class Game:
                 TARGET in row for row in self.board
             )
         self.game_over = not self.can_move()
+        self.finish_contract()
         return changed
 
     def can_move(self):
@@ -154,6 +173,11 @@ class Game:
         for r, c in targets:
             self.board[r][c] = 0
         self.charges["fire"] -= 1
+        self.record_element("fire")
+        if self.contract == "fire":
+            self.contract_progress = max(self.contract_progress, len(targets))
+            if len(targets) == 4:
+                self.complete_contract()
         return True
 
     def use_ice(self):
@@ -161,6 +185,8 @@ class Game:
             return False
         self.charges["ice"] -= 1
         self.ice_moves = 4
+        self.ice_points = 0
+        self.record_element("ice")
         return True
 
     def use_lightning(self, first, second):
@@ -175,5 +201,69 @@ class Game:
             return False
         self.board[r1][c1], self.board[r2][c2] = self.board[r2][c2], self.board[r1][c1]
         self.charges["lightning"] -= 1
+        self.record_element("lightning")
         self.game_over = not self.can_move()
+        self.finish_contract()
         return True
+
+
+    def complete_contract(self):
+        if self.contract_state != "active":
+            return
+        self.contract_state = "complete"
+        info = CONTRACTS[self.contract]
+        self.reward_events.append(
+            ("contract", info["title"], info["reward"], None))
+
+    def record_move(self, points):
+        created = {self.board[r][c] for r, c in self.merged_cells}
+        for value in sorted(created):
+            if value in TILE_REWARDS and value not in self.earned_tiles:
+                self.earned_tiles.add(value)
+                self.reward_events.append(
+                    (f"tile:{value}", f"Плитка {value}", TILE_REWARDS[value], None))
+        if self.contract == "clean" and self.contract_state == "active":
+            self.contract_progress = max(max(row) for row in self.board)
+            if self.contract_progress >= 256:
+                self.complete_contract()
+        if self.contract == "triple":
+            self.contract_progress = max(self.contract_progress, len(self.merged_cells))
+            if len(self.merged_cells) >= 3:
+                self.complete_contract()
+        if self.ice_moves:
+            self.ice_points += points
+            if self.contract == "ice":
+                self.contract_progress = self.ice_points
+                if self.ice_moves == 1:
+                    if self.ice_points >= 128:
+                        self.complete_contract()
+                    elif self.contract_state == "active":
+                        self.contract_state = "failed"
+
+    def record_element(self, element):
+        self.last_combinations = []
+        self.used_elements.add(element)
+        if self.contract == "clean" and self.contract_state == "active":
+            self.contract_state = "failed"
+        if self.contract == "arsenal":
+            self.contract_progress = len(self.used_elements)
+            if len(self.used_elements) == 3:
+                self.complete_contract()
+        if self.ice_moves and element in ("fire", "lightning"):
+            combination = "thermal" if element == "fire" else "conductor"
+            self.discover_combination(combination)
+        if {self.last_element, element} == {"fire", "lightning"}:
+            self.discover_combination("storm")
+        self.last_element = element
+
+    def discover_combination(self, combination):
+        self.last_combinations.append(combination)
+        if combination not in self.round_combinations:
+            self.round_combinations.add(combination)
+            self.reward_events.append(
+                (f"combo:{combination}", COMBINATIONS[combination]["title"], 25, combination))
+
+
+    def finish_contract(self):
+        if self.game_over and self.contract_state == "active":
+            self.contract_state = "failed"
