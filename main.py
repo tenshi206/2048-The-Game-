@@ -1,11 +1,15 @@
 import tkinter as tk
 
 from game import Game, SIZE, TARGET
+from tkinter import ttk
+
 from high_score import load_high_score, save_high_score
 
 
 BACKGROUND = "#faf8ef"
 TEXT = "#4e463e"
+BOARD_BACKGROUND = "#bbada0"
+CELL_SIZE = 92
 TILE_COLORS = {
     0: "#cdc1b4",
     2: "#eee4da",
@@ -30,10 +34,13 @@ class GameWindow:
         root.title("2048")
         root.configure(bg=BACKGROUND)
         root.resizable(False, False)
+        root.minsize(448, 0)
+        style = ttk.Style(root)
+        style.configure("NewGame.TButton", font=("TkDefaultFont", 12, "bold"), padding=(16, 8))
 
         header = tk.Frame(root, bg=BACKGROUND)
-        header.pack(fill="x", padx=16, pady=(12, 8))
-        tk.Label(header, text="2048", font=("TkDefaultFont", 28, "bold"),
+        header.pack(fill="x", padx=24, pady=(20, 12))
+        tk.Label(header, text="2048", font=("TkDefaultFont", 36, "bold"),
                  bg=BACKGROUND, fg=TEXT).pack(side="left")
         scores = tk.Frame(header, bg=BACKGROUND)
         scores.pack(side="right")
@@ -44,13 +51,24 @@ class GameWindow:
                               font=("TkDefaultFont", 14, "bold"))
         self.score.pack(anchor="e")
 
-        board = tk.Frame(root, bg="#bbada0", padx=5, pady=5)
-        board.pack(padx=16)
+        toolbar = tk.Frame(root, bg=BACKGROUND)
+        toolbar.pack(fill="x", padx=24, pady=(0, 16))
+        tk.Label(
+            toolbar, text="Собери плитку 2048", bg=BACKGROUND, fg=TEXT,
+            font=("TkDefaultFont", 12),
+        ).pack(side="left")
+        ttk.Button(
+            toolbar, text="Новая игра", style="NewGame.TButton",
+            command=self.restart,
+        ).pack(side="right")
+
+        board = tk.Frame(root, bg=BOARD_BACKGROUND, padx=6, pady=6)
+        board.pack(padx=24)
         self.tiles = []
         for row in range(SIZE):
             tile_row = []
             for col in range(SIZE):
-                cell = tk.Frame(board, width=78, height=78)
+                cell = tk.Frame(board, width=CELL_SIZE, height=CELL_SIZE)
                 cell.grid(row=row, column=col, padx=4, pady=4)
                 cell.pack_propagate(False)
                 label = tk.Label(cell, borderwidth=0)
@@ -58,9 +76,11 @@ class GameWindow:
                 tile_row.append(label)
             self.tiles.append(tile_row)
 
-        self.status = tk.Label(root, bg=BACKGROUND, fg=TEXT)
-        self.status.pack(pady=(10, 4))
-        tk.Button(root, text="Новая игра", command=self.restart).pack(pady=(0, 12))
+        self.status = tk.Label(
+            root, bg=BACKGROUND, fg=TEXT, wraplength=380,
+            font=("TkDefaultFont", 12), justify="center",
+        )
+        self.status.pack(fill="x", padx=24, pady=(16, 20))
 
         root.bind("<KeyPress>", self.on_move)
         self.draw()
@@ -103,7 +123,7 @@ class GameWindow:
                     text=str(value) if value else "",
                     bg=TILE_COLORS.get(value, "#3c3a32"),
                     fg=TEXT if value <= 4 else "white",
-                    font=("TkDefaultFont", 22 if value < 1000 else 16, "bold"),
+                    font=("TkDefaultFont", 28 if value < 1000 else 20, "bold"),
                 )
 
         self.score.configure(text=f"Счёт: {self.game.score}")
