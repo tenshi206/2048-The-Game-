@@ -32,6 +32,11 @@ class Game:
     def reset(self):
         self.board = [[0] * SIZE for _ in range(SIZE)]
         self.score = 0
+        self.charges = {"fire": 0, "ice": 0, "lightning": 0}
+        self.rewarded = set()
+        self.ice_moves = 0
+        self.ice_just_ended = False
+        self.game_over = False
         self.reached_target = False
         self.transitions = []
         self.merged_cells = set()
@@ -56,6 +61,9 @@ class Game:
         if direction not in ("left", "right", "up", "down"):
             raise ValueError(f"Неизвестное направление: {direction}")
 
+        if self.game_over:
+            return False
+        self.ice_just_ended = False
         positions = range(SIZE)
         if direction in ("right", "down"):
             positions = reversed(range(SIZE))
@@ -95,10 +103,16 @@ class Game:
                     self.board[row][col] = value
 
         if changed:
-            self.add_tile()
+            self.award_elements()
+            if self.ice_moves:
+                self.ice_moves -= 1
+                self.ice_just_ended = self.ice_moves == 0
+            else:
+                self.add_tile()
             self.reached_target = self.reached_target or any(
                 TARGET in row for row in self.board
             )
+        self.game_over = not self.can_move()
         return changed
 
     def can_move(self):
@@ -112,3 +126,54 @@ class Game:
                 if row + 1 < SIZE and value == self.board[row + 1][col]:
                     return True
         return False
+
+
+    def award_elements(self):
+        rewards = {128: ("lightning",), 256: ("fire",),
+                   512: ("ice",), 1024: ("fire", "lightning")}
+        created = {self.board[row][col] for row, col in self.merged_cells}
+        for value in created:
+            if value in rewards and value not in self.rewarded:
+                self.rewarded.add(value)
+                for element in rewards[value]:
+                    limit = 1 if element == "ice" else 2
+                    self.charges[element] = min(limit, self.charges[element] + 1)
+
+    def available(self, element):
+        return not self.game_over and self.can_move() and self.charges[element] > 0
+
+    def use_fire(self, row, col):
+        if not (0 <= row < SIZE - 1 and 0 <= col < SIZE - 1):
+            return False
+        if not self.available("fire"):
+            return False
+        targets = [(r, c) for r in range(row, row + 2)
+                   for c in range(col, col + 2) if 0 < self.board[r][c] <= 32]
+        if not targets:
+            return False
+        for r, c in targets:
+            self.board[r][c] = 0
+        self.charges["fire"] -= 1
+        return True
+
+    def use_ice(self):
+        if not self.available("ice") or self.ice_moves:
+            return False
+        self.charges["ice"] -= 1
+        self.ice_moves = 4
+        return True
+
+    def use_lightning(self, first, second):
+        if not self.available("lightning"):
+            return False
+        for cell in (first, second):
+            if len(cell) != 2 or not all(isinstance(i, int) and 0 <= i < SIZE for i in cell):
+                return False
+        r1, c1 = first
+        r2, c2 = second
+        if self.board[r1][c1] == 0 or self.board[r1][c1] == self.board[r2][c2]:
+            return False
+        self.board[r1][c1], self.board[r2][c2] = self.board[r2][c2], self.board[r1][c1]
+        self.charges["lightning"] -= 1
+        self.game_over = not self.can_move()
+        return True
